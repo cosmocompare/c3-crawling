@@ -37,7 +37,8 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
-    'c3_crawling_app'
+    'c3_crawling_app',
+    
 ]
 
 MIDDLEWARE = [
