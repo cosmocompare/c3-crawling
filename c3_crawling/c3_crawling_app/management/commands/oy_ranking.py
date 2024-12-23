@@ -13,7 +13,8 @@ import logging
 logging.basicConfig(
     filename='crawling.log',
     level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s'
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    encoding='utf-8'
 )
 
 class Command(BaseCommand):
@@ -44,9 +45,10 @@ class Command(BaseCommand):
             driver.get(ranking_url)
             time.sleep(3)
 
-            products_data = []
-            product_count = 0
+            products_data = [] # 수집된 제품 데이터를 저장할 리스트
+            product_count = 0 # 수집된 제품 수 카운터
 
+            # 상위 100개 제품 수집
             while product_count < 100:
                 # 페이지 스크롤
                 driver.find_element(By.TAG_NAME, 'body').send_keys(Keys.END)
@@ -82,12 +84,12 @@ class Command(BaseCommand):
             brand = product.find_element(By.CLASS_NAME, 'tx_brand').text
             cosmetic_name = product.find_element(By.CLASS_NAME, 'tx_name').text
             
-            oy_price = product.find_element(By.CLASS_NAME, 'tx_cur').text
+            sale_price = product.find_element(By.CLASS_NAME, 'tx_cur').text.replace('원', '').replace('~', '').replace(',', '')
 
             try:
-                price = product.find_element(By.CLASS_NAME, 'tx_org').text
+                price = product.find_element(By.CLASS_NAME, 'tx_org').text.replace('원', '').replace('~', '').replace(',', '')
             except NoSuchElementException:
-                price = oy_price
+                price = sale_price
                 logging.info(f'정상가격 없음, 할인가격으로 대체: {cosmetic_name}')
             
             cosmetic_url = product.find_element(By.CLASS_NAME, 'prd_thumb').get_attribute('href')
@@ -98,7 +100,7 @@ class Command(BaseCommand):
                 'brand': brand,
                 'cosmetic_name': cosmetic_name,
                 'price': price,
-                'oy_price': oy_price,
+                'sale_price': sale_price,
                 'cosmetic_url': cosmetic_url,
                 'image_url': image_url
             }
@@ -118,13 +120,13 @@ class Command(BaseCommand):
                 for product in products_data:
                     if product:
                         cursor.execute("""
-                            INSERT INTO ranking (brand, cosmetic_name, price, oy_price, cosmetic_url, image_url)
+                            INSERT INTO ranking (brand, cosmetic_name, price, sale_price, cosmetic_url, image_url)
                             VALUES (%s, %s, %s, %s, %s, %s)
                         """, [
                             str(product['brand']),
                             str(product['cosmetic_name']),
-                            str(product['price']) if product['price'] is not None else None,
-                            str(product['oy_price']),
+                            str(product['price']),
+                            str(product['sale_price']),
                             str(product['cosmetic_url']),
                             str(product['image_url'])
                         ])
