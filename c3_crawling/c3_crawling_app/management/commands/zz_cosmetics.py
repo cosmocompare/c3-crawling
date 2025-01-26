@@ -2,44 +2,41 @@ from django.core.management.base import BaseCommand
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
-from selenium.common.exceptions import NoSuchElementException
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
 from django.utils import timezone
 from django.db import connection
 import time
 import logging
 
 logging.basicConfig(
-    filename='oy_crawling.log',
+    filename='zz_crawling.log',
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
     encoding='utf-8'
 )
 
 class Command(BaseCommand):
-    help = '올리브영 상품 크롤링'
+    help = '지그재그 상품 크롤링'
 
     def handle(self, *args, **options):
         try:
-            self.crawl_oliveyoung()
+            self.crawl_zigzag()
             self.stdout.write(self.style.SUCCESS('크롤링 완료'))
             logging.info('크롤링 작업 성공')
         except Exception as e:
             self.stdout.write(self.style.ERROR(f'크롤링 실패: {str(e)}'))
             logging.error(f'크롤링 작업 실패: {str(e)}')
 
-    def crawl_oliveyoung(self):
+    def crawl_zigzag(self):
         categories = {
-            "스킨케어": ["100000100010013", "100000100010014", "100000100010015", 
-                      "100000100010016", "100000100010010", "100000100010017"],
-            "마스크팩": ["100000100090001", "100000100090004", "100000100090002", 
-                      "100000100090005", "100000100090006"],
-            "클렌징": ["100000100100001", "100000100100004", "100000100100005", 
-                    "100000100100007", "100000100100008", "100000100100006"],
-            "선케어": ["100000100110006", "100000100110003", "100000100110004", 
-                    "100000100110005", "100000100110002"],
-            "립메이크업": ["100000100020006"],
-            "베이스메이크업": ["100000100020001"],
-            "아이메이크업": ["100000100020007"]
+            "스킨케어": "1100",
+            "마스크팩": "1106",
+            "클렌징": "1105", 
+            "선케어": "1101",
+            "립메이크업": "1104",
+            "베이스메이크업": "1102",
+            "아이메이크업": "1103"
         }
 
         chrome_options = Options()
@@ -51,67 +48,74 @@ class Command(BaseCommand):
 
         try:
             today = timezone.now().date()
-            for category_name, subcategories in categories.items():
-                for category_code in subcategories:
-                    self.crawl_category(driver, category_name, category_code, today)
+            for category_name, category_code in categories.items():
+                self.crawl_category(driver, category_name, category_code, today)
         finally:
             driver.quit()
 
     def crawl_category(self, driver, category_name, category_code, today):
-        page_number = 1
+        url = f'https://zigzag.kr/categories/1098?middle_category_id={category_code}&title={category_name}'
+        driver.get(url)
+        time.sleep(2)
+
+        scroll_pause_time = 2
+        last_height = driver.execute_script("return document.body.scrollHeight")
+
         while True:
-            try:
-                search_url = f"https://www.oliveyoung.co.kr/store/display/getMCategoryList.do?dispCatNo={category_code}&isLoginCnt=0&aShowCnt=0&bShowCnt=0&cShowCnt=0&pageIdx={page_number}&rowsPerPage=24&searchTypeSort=btn_thumb&plusButtonFlag=N"
-                driver.get(search_url)
-                time.sleep(2)
+            driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+            time.sleep(scroll_pause_time)
 
-                products = driver.find_elements(By.CLASS_NAME, 'prd_info')
-                if not products:
-                    break
-
-                for product in products:
-                    try:
-                        product_data = self.extract_product_data(product, category_name)
-                        if product_data:
-                            self.save_or_update_product(product_data, today)
-                    except Exception as e:
-                        logging.error(f'상품 처리 중 오류: {str(e)}')
-                        continue
-
-                if not self.has_next_page(driver):
-                    break
-                page_number += 1
-
-            except Exception as e:
-                logging.error(f'페이지 처리 중 오류: {str(e)}')
+            new_height = driver.execute_script("return document.body.scrollHeight")
+            if new_height == last_height:
                 break
+            last_height = new_height
 
-    def extract_product_data(self, product, category_name):
+            products = WebDriverWait(driver, 10).until(
+                EC.presence_of_all_elements_located((By.CLASS_NAME, 'css-5hci9z'))
+            )
+
+            for product in products:
+                try:
+                    product_data = self.extract_product_data(driver, product, category_name)
+                    if product_data:
+                        self.save_or_update_product(product_data, today)
+                except Exception as e:
+                    logging.error(f'상품 처리 중 오류: {str(e)}')
+                    continue
+
+    def extract_product_data(self, driver, product, category_name):
         try:
-            brand = product.find_element(By.CLASS_NAME, 'tx_brand').text
-            cosmetic_name = product.find_element(By.CLASS_NAME, 'tx_name').text
-            
-            sale_price_raw = product.find_element(By.CLASS_NAME, 'tx_cur').text
+            brand = product.find_element(By.XPATH, './/span[@class="zds4_1kdomr8"]').text
+            name = product.find_element(By.XPATH, './/p[@class="zds4_1kdomrc zds4_1kdomra"]').text
+            sale_price_raw = product.find_element(By.XPATH, './/span[@class="zds4_s96ru86 zds4_s96ru8w zds4_1jsf80i3 zds4_1jsf80i5"]').text
             sale_price = ''.join(filter(str.isdigit, sale_price_raw))
-            
+            product_url = product.find_element(By.XPATH, './/a[@class="css-152zj1o product-card-link"]').get_attribute('href')
+            image_url = product.find_element(By.XPATH, './/img[@class="zds4_11053yc2"]').get_attribute('src')
+
+            driver.execute_script("window.open('');")
+            driver.switch_to.window(driver.window_handles[-1])
+            driver.get(product_url)
+            time.sleep(1)
+
             try:
-                price_raw = product.find_element(By.CLASS_NAME, 'tx_org').text
+                price_raw = driver.find_element(By.CLASS_NAME, 'css-14j45be').text
                 price = ''.join(filter(str.isdigit, price_raw))
-            except NoSuchElementException:
+            except:
                 price = sale_price
-                
-            cosmetic_url = product.find_element(By.CLASS_NAME, 'prd_thumb').get_attribute('href')
-            image_url = product.find_element(By.CLASS_NAME, 'prd_thumb').find_element(By.TAG_NAME, 'img').get_attribute('src')
+
+            driver.close()
+            driver.switch_to.window(driver.window_handles[0])
 
             return {
                 'category': category_name,
                 'brand': brand,
-                'cosmetic_name': cosmetic_name,
+                'cosmetic_name': name,
                 'price': price,
                 'sale_price': sale_price,
-                'cosmetic_url': cosmetic_url,
+                'cosmetic_url': product_url,
                 'image_url': image_url
             }
+
         except Exception as e:
             logging.error(f'데이터 추출 중 오류: {str(e)}')
             return None
@@ -121,7 +125,7 @@ class Command(BaseCommand):
             try:
                 cursor.execute("""
                     SELECT cosmetic_url, price, sale_price 
-                    FROM oycosmetic 
+                    FROM zzcosmetic 
                     WHERE cosmetic_url = %s
                 """, [product_data['cosmetic_url']])
                 
@@ -131,7 +135,7 @@ class Command(BaseCommand):
                     if (existing_product[1] != product_data['price'] or 
                         existing_product[2] != product_data['sale_price']):
                         cursor.execute("""
-                            UPDATE oycosmetic 
+                            UPDATE zzcosmetic 
                             SET price = %s, sale_price = %s, updated_at = %s
                             WHERE cosmetic_url = %s
                         """, [
@@ -143,7 +147,7 @@ class Command(BaseCommand):
                         logging.info(f"상품 업데이트: {product_data['cosmetic_name']}")
                 else:
                     cursor.execute("""
-                        INSERT INTO oycosmetic (
+                        INSERT INTO zzcosmetic (
                             category, brand, cosmetic_name, price, 
                             sale_price, cosmetic_url, image_url, 
                             created_at, updated_at
@@ -167,8 +171,3 @@ class Command(BaseCommand):
                 connection.rollback()
                 logging.error(f'데이터베이스 저장 중 오류: {str(e)}')
                 raise e
-
-    def has_next_page(self, driver):
-        next_button = driver.find_elements(By.CLASS_NAME, 'next')
-        return next_button and 'disabled' not in next_button[0].get_attribute('class')
-
